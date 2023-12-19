@@ -157,13 +157,13 @@ which [states]:
 > having code optimized out. It is good enough that it is used by default.
 */
 
+extern crate humantime;
 extern crate js_sys;
 extern crate wasm_bindgen;
 extern crate web_sys;
-extern crate humantime;
 
 use std::f64;
-use std::fmt::{self,Display,Formatter};
+use std::fmt::{self, Display, Formatter};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
@@ -195,13 +195,21 @@ pub struct Stats {
 impl Display for Stats {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         if self.ns_per_iter.is_nan() {
-            write!(f, "Only generated {} sample(s) - we can't fit a regression line to that! \
-            Try making your benchmark faster.", self.samples)
+            write!(
+                f,
+                "Only generated {} sample(s) - we can't fit a regression line to that! \
+            Try making your benchmark faster.",
+                self.samples
+            )
         } else {
-            let per_iter: humantime::Duration = Duration::from_nanos(self.ns_per_iter as u64).into();
+            let per_iter: humantime::Duration =
+                Duration::from_nanos(self.ns_per_iter as u64).into();
             let per_iter = format!("{}", per_iter);
-            write!(f, "{:>11} (R²={:.3}, {} iterations in {} samples)",
-                per_iter, self.goodness_of_fit, self.iterations, self.samples)
+            write!(
+                f,
+                "{:>11} (R²={:.3}, {} iterations in {} samples)",
+                per_iter, self.goodness_of_fit, self.iterations, self.samples
+            )
         }
     }
 }
@@ -211,8 +219,11 @@ impl Display for Stats {
 /// The return value of `f` is not used, but we trick the optimiser into thinking we're going to
 /// use it. Make sure to return enough information to prevent the optimiser from eliminating code
 /// from your benchmark! (See the module docs for more.)
-pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
-    bench_env_limit(BENCH_TIME_LIMIT_SECS, (), |_| f() )
+pub fn bench<F, O>(mut f: F) -> Stats
+where
+    F: FnMut() -> O,
+{
+    bench_env_limit(BENCH_TIME_LIMIT_SECS, (), |_| f())
 }
 
 /// Run a benchmark with an environment.
@@ -234,45 +245,60 @@ pub fn bench<F, O>(f: F) -> Stats where F: Fn() -> O {
 /// DRAM at the start of every iteration). In this case the results could be affected by a hundred
 /// nanoseconds. This is a worst-case scenario however, and I haven't actually been able to trigger
 /// it in practice... but it's good to be aware of the possibility.
-pub fn bench_env<F, I, O>(env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Clone {
-    bench_env_limit_ref(BENCH_TIME_LIMIT_SECS, env, f )
+pub fn bench_env<F, I, O>(env: I, f: F) -> Stats
+where
+    F: FnMut(&mut I) -> O,
+    I: Clone,
+{
+    bench_env_limit_ref(BENCH_TIME_LIMIT_SECS, env, f)
 }
 
 /// Run a benchmark, specifying the run time limit.
 ///
 /// See [bench](fn.bench.html)
-pub fn bench_limit<F, O>(time_limit_secs: f64, f: F) -> Stats where F: Fn() -> O {
-    bench_env_limit(time_limit_secs, (), |_| f() )
+pub fn bench_limit<F, O>(time_limit_secs: f64, mut f: F) -> Stats
+where
+    F: FnMut() -> O,
+{
+    bench_env_limit(time_limit_secs, (), |_| f())
 }
 
 /// Run a benchmark with an environment, specifying the run time limit.
 ///
 /// See [bench_env](fn.bench_env.html)
-pub fn bench_env_limit<F, I, O>(time_limit_secs: f64, env: I, f: F) -> Stats where F: Fn(I) -> O, I: Clone {
-    run_bench(time_limit_secs, env,
-        |xs| {
-            for i in xs.into_iter() {
-                pretend_to_use(f(i));             // Run the code and pretend to use the output
-            }
+pub fn bench_env_limit<F, I, O>(time_limit_secs: f64, env: I, mut f: F) -> Stats
+where
+    F: FnMut(I) -> O,
+    I: Clone,
+{
+    run_bench(time_limit_secs, env, |xs| {
+        for i in xs.into_iter() {
+            pretend_to_use(f(i)); // Run the code and pretend to use the output
         }
-    )
+    })
 }
 
 /// Run a benchmark with an environment, specifying the run time limit. The function to bench takes a mutable reference
 /// to the `env` parameter instead of a struct.
 ///
 /// See [bench_env](fn.bench_env.html)
-pub fn bench_env_limit_ref<F, I, O>(time_limit_secs: f64, env: I, f: F) -> Stats where F: Fn(&mut I) -> O, I: Clone {
-    run_bench(time_limit_secs, env,
-        |mut xs| {
-            for i in xs.iter_mut() {
-                pretend_to_use(f(i));             // Run the code and pretend to use the output
-            }
+pub fn bench_env_limit_ref<F, I, O>(time_limit_secs: f64, env: I, mut f: F) -> Stats
+where
+    F: FnMut(&mut I) -> O,
+    I: Clone,
+{
+    run_bench(time_limit_secs, env, |mut xs| {
+        for i in xs.iter_mut() {
+            pretend_to_use(f(i)); // Run the code and pretend to use the output
         }
-    )
+    })
 }
 
-fn run_bench<F, I>(time_limit_secs: f64, env: I, f: F) -> Stats where F: Fn(Vec<I>), I: Clone {
+fn run_bench<F, I>(time_limit_secs: f64, env: I, mut f: F) -> Stats
+where
+    F: FnMut(Vec<I>),
+    I: Clone,
+{
     let mut data = Vec::new();
     let performance = js_sys::global()
         .unchecked_into::<web_sys::Window>()
@@ -284,8 +310,8 @@ fn run_bench<F, I>(time_limit_secs: f64, env: I, f: F) -> Stats where F: Fn(Vec<
     // Collect data until BENCH_TIME_LIMIT_SECS is reached.
     while (performance.now() - bench_start) < (time_limit_secs * 1000_f64) {
         let iters = ITER_SCALE_FACTOR.powi(data.len() as i32).round() as usize;
-        let xs = vec![env.clone();iters]; // Prepare the environments - one per iteration
-        let iter_start = performance.now();      // Start the clock
+        let xs = vec![env.clone(); iters]; // Prepare the environments - one per iteration
+        let iter_start = performance.now(); // Start the clock
         f(xs);
         let time = performance.now() - iter_start;
         data.push((iters, time));
@@ -301,7 +327,7 @@ fn run_bench<F, I>(time_limit_secs: f64, env: I, f: F) -> Stats where F: Fn(Vec<
     Stats {
         ns_per_iter: grad,
         goodness_of_fit: r2,
-        iterations: data.iter().map(|&(x,_)| x).sum(),
+        iterations: data.iter().map(|&(x, _)| x).sum(),
         samples: data.len(),
     }
 }
@@ -317,16 +343,16 @@ fn regression(data: &[(usize, f64)]) -> (f64, f64) {
         return (f64::NAN, f64::NAN);
     }
 
-    let data: Vec<(u64, u64)> = data.iter().map(|&(x,y)| (x as u64, as_nanos(y))).collect();
+    let data: Vec<(u64, u64)> = data.iter().map(|&(x, y)| (x as u64, as_nanos(y))).collect();
     let n = data.len() as f64;
-    let nxbar  = data.iter().map(|&(x,_)| x  ).sum::<u64>(); // iter_time > 5e-11 ns
-    let nybar  = data.iter().map(|&(_,y)| y  ).sum::<u64>(); // TIME_LIMIT < 2 ^ 64 ns
-    let nxxbar = data.iter().map(|&(x,_)| x*x).sum::<u64>(); // num_iters < 13_000_000_000
-    let nyybar = data.iter().map(|&(_,y)| y*y).sum::<u64>(); // TIME_LIMIT < 4.3 e9 ns
-    let nxybar = data.iter().map(|&(x,y)| x*y).sum::<u64>();
+    let nxbar = data.iter().map(|&(x, _)| x).sum::<u64>(); // iter_time > 5e-11 ns
+    let nybar = data.iter().map(|&(_, y)| y).sum::<u64>(); // TIME_LIMIT < 2 ^ 64 ns
+    let nxxbar = data.iter().map(|&(x, _)| x * x).sum::<u64>(); // num_iters < 13_000_000_000
+    let nyybar = data.iter().map(|&(_, y)| y * y).sum::<u64>(); // TIME_LIMIT < 4.3 e9 ns
+    let nxybar = data.iter().map(|&(x, y)| x * y).sum::<u64>();
     let ncovar = nxybar as f64 - ((nxbar * nybar) as f64 / n);
-    let nxvar  = nxxbar as f64 - ((nxbar * nxbar) as f64 / n);
-    let nyvar  = nyybar as f64 - ((nybar * nybar) as f64 / n);
+    let nxvar = nxxbar as f64 - ((nxbar * nxbar) as f64 / n);
+    let nyvar = nyybar as f64 - ((nybar * nybar) as f64 / n);
     let gradient = ncovar / nxvar;
     let r2 = (ncovar * ncovar) / (nxvar * nyvar);
     (gradient, r2)
